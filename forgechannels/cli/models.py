@@ -1,0 +1,26 @@
+"""Data models for ForgeChannels."""
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Contact:
+    email: str
+    first_name: str
+    last_name: str
+    company: str
+    title: str
+    signal: str
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.first_name} {self.last_name}"
+
+
+@dataclass
+class MessageResult:
+    contact: Contact
+    space_name: str | None = None
+    message_id: str | None = None
+    success: bool = False
+    error: str | None = None
