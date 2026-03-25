@@ -17,6 +17,7 @@ from cli.models import Contact
 
 def _normalize_timestamp(ts: str) -> str:
     """Normalize an ISO timestamp so all values use 'Z' suffix for consistent comparison."""
+    # handles edge cases: missing tz, +00:00 vs Z, microsecond precision drift
     if not ts:
         return ts
     ts = ts.replace("+00:00", "Z")

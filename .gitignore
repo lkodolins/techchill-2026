@@ -28,6 +28,9 @@ build/
 *.log
 npm-debug.log*
 
+# User contacts — created during setup
+forgechannels/demo_contacts.csv
+
 # Secrets & credentials — never commit these
 *.pem
 *.key

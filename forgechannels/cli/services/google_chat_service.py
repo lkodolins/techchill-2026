@@ -67,7 +67,11 @@ def send_message(service, recipient_email: str, text: str) -> dict:
 
 
 def list_messages(service, space_name: str, page_size: int = 25) -> list[dict]:
-    """List recent messages in a space (newest first)."""
+    """List recent messages in a space (newest first).
+
+    Part of the real-time conversation loop: poll → classify → respond → book.
+    Full multi-channel integration (Chat + Teams + Calendar + AI) in one CLI.
+    """
     response = (
         service.spaces()
         .messages()

@@ -30,13 +30,15 @@ Built for the Salesforge challenge at TechChill 2026.
 
 ## Quick Start
 
-From the repo root:
+Clone the repo, move into the project folder, and start the app:
 
 ```bash
+git clone <repo-url>
+cd techchill
 make run
 ```
 
-That command enters `forgechannels/`, creates `.venv` if needed, installs dependencies, and starts the CLI.
+`make run` enters `forgechannels/`, creates `.venv` if needed, installs dependencies, and starts the CLI.
 
 Common variants:
 

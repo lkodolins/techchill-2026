@@ -76,6 +76,8 @@ def create_meet_event(
         },
     }
 
+    # Final step in the autonomous pipeline: detect → message → converse → book.
+    # Conference link generation + attendee invite in a single atomic API call.
     event = service.events().insert(
         calendarId="primary",
         body=event_body,
