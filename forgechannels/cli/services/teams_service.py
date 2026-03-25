@@ -4,10 +4,12 @@ import json
 import time
 import webbrowser
 from pathlib import Path
+from urllib.parse import quote
 
 import msal
 import requests
 
+from cli.auth.config_store import get_config_value
 from rich.console import Console
 
 console = Console()
@@ -15,6 +17,11 @@ console = Console()
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 SCOPES = ["Chat.ReadWrite", "Chat.Create", "User.ReadBasic.All"]
 TOKEN_CACHE = Path.home() / ".forgechannels" / "teams_token.json"
+EXTERNAL_USERS_KEY = "microsoft_external_users"
+
+
+class TeamsRecipientResolutionError(RuntimeError):
+    """Raised when a Teams recipient cannot be resolved for chat creation."""
 
 
 def _load_token_cache() -> msal.SerializableTokenCache:
@@ -67,8 +74,72 @@ def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
+def _get_my_user_id(token: str) -> str:
+    resp = requests.get(f"{GRAPH_BASE}/me?$select=id", headers=_headers(token))
+    resp.raise_for_status()
+    return resp.json()["id"]
+
+
+def _build_member(user_id: str, *, role: str, tenant_id: str | None = None) -> dict:
+    member = {
+        "@odata.type": "#microsoft.graph.aadUserConversationMember",
+        "roles": [role],
+        "user@odata.bind": f"{GRAPH_BASE}/users('{user_id}')",
+    }
+    if tenant_id:
+        member["tenantId"] = tenant_id
+    return member
+
+
+def _get_external_recipient_mapping(recipient_email: str) -> dict | None:
+    external_users = get_config_value(EXTERNAL_USERS_KEY, {}) or {}
+    return external_users.get(recipient_email.lower()) or external_users.get(recipient_email)
+
+
+def _resolve_recipient(token: str, recipient_email: str) -> dict:
+    recipient_email = recipient_email.strip().lower()
+
+    external_mapping = _get_external_recipient_mapping(recipient_email)
+    if external_mapping:
+        user_id = external_mapping.get("user_id")
+        tenant_id = external_mapping.get("tenant_id")
+        if user_id and tenant_id:
+            return {
+                "user_id": user_id,
+                "role": "owner",
+                "tenant_id": tenant_id,
+                "email": recipient_email,
+            }
+
+    resp = requests.get(
+        f"{GRAPH_BASE}/users/{quote(recipient_email, safe='')}",
+        headers=_headers(token),
+    )
+    if resp.ok:
+        payload = resp.json()
+        return {
+            "user_id": payload["id"],
+            "role": "guest" if payload.get("userType") == "Guest" else "owner",
+            "tenant_id": None,
+            "email": (payload.get("mail") or payload.get("userPrincipalName") or recipient_email).lower(),
+        }
+
+    if resp.status_code == 404:
+        raise TeamsRecipientResolutionError(
+            "Graph could not resolve this email to a user in your Entra tenant. "
+            "For an external Teams user, add "
+            f"'{EXTERNAL_USERS_KEY}' to ~/.forgechannels/config.json with their "
+            "'user_id' and 'tenant_id', or invite them as a guest first."
+        )
+
+    resp.raise_for_status()
+    raise TeamsRecipientResolutionError(f"Unable to resolve Teams recipient: {recipient_email}")
+
+
 def _find_or_create_chat(token: str, recipient_email: str) -> str:
     """Find existing 1:1 chat or create one. Returns chat ID."""
+    recipient_email = recipient_email.strip().lower()
+
     # Search existing chats
     resp = requests.get(
         f"{GRAPH_BASE}/me/chats?$filter=chatType eq 'oneOnOne'&$expand=members&$top=50",
@@ -83,19 +154,21 @@ def _find_or_create_chat(token: str, recipient_email: str) -> str:
                 if m.get("email", "").lower() == recipient_email.lower():
                     return chat["id"]
 
-    # Create new 1:1 chat
+    me_id = _get_my_user_id(token)
+    recipient = _resolve_recipient(token, recipient_email)
+
     body = {
         "chatType": "oneOnOne",
         "members": [
-            {
-                "@odata.type": "#microsoft.graph.aadUserConversationMember",
-                "roles": ["owner"],
-                "user@odata.bind": f"https://graph.microsoft.com/v1.0/users('{recipient_email}')",
-            },
-            # Self is added automatically
+            _build_member(me_id, role="owner"),
+            _build_member(
+                recipient["user_id"],
+                role=recipient["role"],
+                tenant_id=recipient["tenant_id"],
+            ),
         ],
     }
-    resp = requests.post(f"{GRAPH_BASE}/me/chats", headers=_headers(token), json=body)
+    resp = requests.post(f"{GRAPH_BASE}/chats", headers=_headers(token), json=body)
     resp.raise_for_status()
     return resp.json()["id"]
 

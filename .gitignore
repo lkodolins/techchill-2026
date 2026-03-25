@@ -30,3 +30,5 @@ npm-debug.log*
 *.key
 forgechannels/credentials/google_client_secret.json
 forgechannels/token.json
+**/token.json
+~/.forgechannels/
