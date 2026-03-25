@@ -67,11 +67,15 @@ def send_message(service, recipient_email: str, text: str) -> dict:
 
 
 def list_messages(service, space_name: str, page_size: int = 25) -> list[dict]:
-    """List recent messages in a space."""
+    """List recent messages in a space (newest first)."""
     response = (
         service.spaces()
         .messages()
-        .list(parent=space_name, pageSize=page_size)
+        .list(
+            parent=space_name,
+            pageSize=page_size,
+            orderBy="createTime desc",
+        )
         .execute()
     )
     return response.get("messages", [])

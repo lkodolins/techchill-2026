@@ -16,7 +16,7 @@ def create_meet_event(
     attendee_email: str,
     sender_email: str,
     summary: str = "Quick intro call — ForgeChannels",
-    description: str = "Looking forward to connecting!",
+    description: str = "",
     duration_minutes: int = 15,
     days_from_now: int = 2,
     hour: int = 10,
@@ -32,6 +32,20 @@ def create_meet_event(
         hour=hour, minute=0, second=0, microsecond=0
     ) + timedelta(days=days_from_now)
     end = start + timedelta(minutes=duration_minutes)
+
+    if not description:
+        description = (
+            f"Hi {attendee_email.split('@')[0].title()},\n\n"
+            f"Thanks for taking the time to chat!\n\n"
+            f"In this call we'll cover:\n"
+            f"• A quick intro to ForgeChannels — outreach via Google Chat & Teams\n"
+            f"• How chat channels get 3-5x higher response rates vs cold email\n"
+            f"• How it fits with your current sales stack\n\n"
+            f"No prep needed — just a casual 15-min conversation.\n\n"
+            f"If the time doesn't work, just reply and we'll reschedule.\n\n"
+            f"— ForgeChannels team\n"
+            f"https://salesforge.ai"
+        )
 
     event_body = {
         "summary": summary,

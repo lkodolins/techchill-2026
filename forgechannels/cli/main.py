@@ -255,6 +255,8 @@ def run(
         console.print("\n[red]No channels authenticated. Nothing to send.[/red]")
         raise typer.Exit(1)
 
+    total = len(sendable)
+
     # Step 5a: Create Google Meet links for each contact
     console.print(f"\n[bold]Step 5:[/bold] Creating calendar events + Meet links\n")
     meet_links: dict[str, str] = {}  # email -> meet link
@@ -387,7 +389,7 @@ def run(
 
         # Build conversation objects — set last_seen_time to now so we only respond to NEW messages
         from datetime import datetime, timezone
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         conversations = []
         for r in successful_chat_results:
@@ -418,6 +420,8 @@ def run(
             conversations=conversations,
             sender_name=sender_email.split("@")[0],
             sender_id=sender_id,
+            creds=creds,
+            sender_email=sender_email,
         )
 
 
