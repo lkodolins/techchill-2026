@@ -117,8 +117,8 @@ def _check_and_respond(chat_service, ai_client, conv: Conversation, sender_name:
         console.print(f"  [dim]Interest: {interest}[/dim]")
 
         if interest == "not_interested":
-            conv.status = "closed"
-            # Generate a gracious exit
+            conv.status = "not_interested"
+            # Still reply graciously — leave the door open
             reply = generate_reply(
                 ai_client,
                 conv.history,
@@ -129,6 +129,12 @@ def _check_and_respond(chat_service, ai_client, conv: Conversation, sender_name:
                 signal=conv.contact.signal,
                 booking_url=conv.booking_url,
             )
+            # After sending the gracious reply, mark as closed
+            conv.history.append({"role": "assistant", "content": reply})
+            console.print(f"  [green]→[/green] {reply}")
+            send_message(chat_service, conv.contact.email, reply)
+            conv.status = "closed"
+            return  # done with this conversation
         elif interest == "booked":
             conv.status = "booked"
             reply = generate_reply(
@@ -177,6 +183,7 @@ def _show_status(conversations: list[Conversation]):
         "in_conversation": "[yellow]Chatting[/yellow]",
         "call_proposed": "[blue]Call proposed[/blue]",
         "booked": "[green]Booked![/green]",
+        "not_interested": "[red]Not interested[/red]",
         "closed": "[red]Closed[/red]",
     }
 

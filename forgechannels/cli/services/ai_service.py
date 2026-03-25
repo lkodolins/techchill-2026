@@ -69,11 +69,19 @@ def classify_interest(
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=20,
-        system="Classify the sales prospect's message into exactly one category. Reply with ONLY the category word, nothing else.",
+        system="""Classify the sales prospect's message into exactly one category. Reply with ONLY the category word.
+
+Categories:
+- interested: they're engaging, asking questions, suggesting alternative times, negotiating, or showing curiosity. "That doesn't work for me" or "maybe next week?" = interested (they're open, just not that specific time).
+- neutral: short or ambiguous replies like "ok", "hmm", "who are you?"
+- not_interested: explicit rejection like "no thanks", "stop messaging me", "not interested", "unsubscribe", "please don't contact me"
+- booked: they confirmed a specific time or said they'll join the call
+
+When in doubt, classify as interested or neutral. Only use not_interested for clear, explicit rejections.""",
         messages=[
             {
                 "role": "user",
-                "content": f"Categories: interested, neutral, not_interested, booked\n\nMessage: \"{message}\"",
+                "content": f"Message: \"{message}\"",
             }
         ],
     )

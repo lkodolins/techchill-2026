@@ -382,38 +382,39 @@ def run(
 
     if successful_chat_results and ai_client and chat_service:
         console.print()
-        if Confirm.ask("[bold]Monitor conversations and auto-reply with AI?[/bold]"):
-            sender_email = get_user_email(creds)
+        console.print("[bold]Starting conversation monitor...[/bold]\n")
 
-            # Build conversation objects
-            conversations = []
-            for r in successful_chat_results:
-                booking_url = meet_links.get(r.contact.email, "https://www.google.com")
-                conv = Conversation(
-                    contact=r.contact,
-                    space_name=r.space_name,
-                    booking_url=booking_url,
-                )
-                # Add the opener we sent as first message in history
-                conv.history.append({
-                    "role": "assistant",
-                    "content": generate_message(r.contact, booking_url=booking_url),
-                })
-                conversations.append(conv)
+        sender_email = get_user_email(creds)
 
-            # Get our sender user ID for filtering our own messages
-            from googleapiclient.discovery import build
-            oauth_service = build("oauth2", "v2", credentials=creds)
-            user_info = oauth_service.userinfo().get().execute()
-            sender_id = user_info.get("id", "")
-
-            poll_and_respond(
-                chat_service=chat_service,
-                ai_client=ai_client,
-                conversations=conversations,
-                sender_name=sender_email.split("@")[0],
-                sender_id=sender_id,
+        # Build conversation objects
+        conversations = []
+        for r in successful_chat_results:
+            booking_url = meet_links.get(r.contact.email, "https://www.google.com")
+            conv = Conversation(
+                contact=r.contact,
+                space_name=r.space_name,
+                booking_url=booking_url,
             )
+            # Add the opener we sent as first message in history
+            conv.history.append({
+                "role": "assistant",
+                "content": generate_message(r.contact, booking_url=booking_url),
+            })
+            conversations.append(conv)
+
+        # Get our sender user ID for filtering our own messages
+        from googleapiclient.discovery import build
+        oauth_service = build("oauth2", "v2", credentials=creds)
+        user_info = oauth_service.userinfo().get().execute()
+        sender_id = user_info.get("id", "")
+
+        poll_and_respond(
+            chat_service=chat_service,
+            ai_client=ai_client,
+            conversations=conversations,
+            sender_name=sender_email.split("@")[0],
+            sender_id=sender_id,
+        )
 
 
 if __name__ == "__main__":
