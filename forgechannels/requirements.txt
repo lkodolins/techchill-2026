@@ -7,3 +7,4 @@ pandas
 dnspython
 msal
 requests
+anthropic

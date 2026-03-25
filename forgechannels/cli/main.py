@@ -17,6 +17,8 @@ from cli.services.google_chat_service import get_chat_service, send_message
 from cli.services.teams_service import authenticate_teams, send_teams_message
 from cli.services.email_provider import detect_provider, provider_display_name
 from cli.services.calendar_service import create_meet_event
+from cli.services.ai_service import create_client as create_ai_client
+from cli.services.conversation import Conversation, poll_and_respond
 from cli.models import Contact, MessageResult
 
 app = typer.Typer()
@@ -105,6 +107,24 @@ def preview_messages(contacts: list[Contact]) -> None:
                 border_style=border,
             )
         )
+
+
+def setup_anthropic() -> str | None:
+    """Set up Anthropic API key. Returns the key or None."""
+    import os
+    key = os.environ.get("ANTHROPIC_API_KEY") or get_config_value("anthropic_api_key")
+    if key:
+        console.print(f"  [green]✓[/green] Anthropic API key found")
+        return key
+
+    console.print("\n[bold]Anthropic API key needed[/bold] for AI-powered conversation.")
+    console.print("  Get one at [cyan]https://console.anthropic.com/settings/keys[/cyan]\n")
+    key = Prompt.ask("Anthropic API key (or Enter to skip AI)", default="")
+    if not key:
+        return None
+    set_config_value("anthropic_api_key", key)
+    console.print(f"  [green]✓[/green] Saved\n")
+    return key
 
 
 def setup_teams_auth() -> str | None:
@@ -221,6 +241,11 @@ def run(
 
     if needs_teams:
         teams_token = setup_teams_auth()
+
+    # Anthropic API key for conversation AI
+    console.print("[bold]AI:[/bold] Setting up conversation engine...")
+    anthropic_key = setup_anthropic()
+    ai_client = create_ai_client(anthropic_key) if anthropic_key else None
 
     # Step 5: Confirm and send
     if not chat_service and not teams_token:
@@ -351,6 +376,44 @@ def run(
     console.print(
         f"\n[bold green]{sent} sent[/bold green] / [bold red]{failed} failed[/bold red]"
     )
+
+    # Step 7: Conversation monitoring (Google Chat only, needs AI)
+    successful_chat_results = [r for r in results if r.success and r.channel == "google_chat" and r.space_name]
+
+    if successful_chat_results and ai_client and chat_service:
+        console.print()
+        if Confirm.ask("[bold]Monitor conversations and auto-reply with AI?[/bold]"):
+            sender_email = get_user_email(creds)
+
+            # Build conversation objects
+            conversations = []
+            for r in successful_chat_results:
+                booking_url = meet_links.get(r.contact.email, "https://www.google.com")
+                conv = Conversation(
+                    contact=r.contact,
+                    space_name=r.space_name,
+                    booking_url=booking_url,
+                )
+                # Add the opener we sent as first message in history
+                conv.history.append({
+                    "role": "assistant",
+                    "content": generate_message(r.contact, booking_url=booking_url),
+                })
+                conversations.append(conv)
+
+            # Get our sender user ID for filtering our own messages
+            from googleapiclient.discovery import build
+            oauth_service = build("oauth2", "v2", credentials=creds)
+            user_info = oauth_service.userinfo().get().execute()
+            sender_id = user_info.get("id", "")
+
+            poll_and_respond(
+                chat_service=chat_service,
+                ai_client=ai_client,
+                conversations=conversations,
+                sender_name=sender_email.split("@")[0],
+                sender_id=sender_id,
+            )
 
 
 if __name__ == "__main__":
