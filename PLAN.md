@@ -2,19 +2,20 @@
 
 > Salesforge owns email. ForgeChannels owns the inbox everyone forgot about.
 > Cold outreach via Google Chat, Microsoft Teams, and Slack — the three most
-> untapped B2B messaging channels. GDPR-compliant, whitelabelable, AI-personalized.
+> untapped B2B messaging channels. GDPR-compliant, AI-personalized.
 
 ---
 
 ## What We're Building
 
-A plug-in orchestration layer for Salesforge that:
-1. Takes a CSV of contacts (or accepts them via Salesforge webhook)
-2. Detects which untapped chat channel each contact is reachable on (Google Chat, Teams, Slack)
-3. Scores and selects the optimal channel per contact
-4. Uses Claude AI to generate a personalized message tuned to that channel's norms and constraints
-5. Shows a live dashboard with previews, then launches with one click
-6. Tracks GDPR consent, opt-outs, and data retention automatically
+A **terminal CLI tool** that:
+1. Walks the user through setup: configure sender email (Google Sign-in via OAuth), input API keys
+2. Takes a CSV of contacts (ships with a `demo_contacts.csv` for testing)
+3. Detects which untapped chat channel each contact is reachable on (Google Chat, Teams, Slack)
+4. Scores and selects the optimal channel per contact
+5. Sends an AI-generated personalized opener via Google Chat
+6. Handles the ongoing conversation with a free LLM (Gemini Flash / Llama via Groq) to keep it natural
+7. Steers the conversation toward booking a demo call (generates a scheduling link)
 
 **The core insight:**
 - Email inboxes: saturated, spam-filtered, ignored
@@ -22,7 +23,41 @@ A plug-in orchestration layer for Salesforge that:
 - Google Chat / Teams / Slack: near-zero cold outreach today, native to how people work, no promotional tab
 
 **Demo flow (48h goal):**
-Upload CSV → Detect chat channels → AI writes channel-native messages → Preview dashboard → Launch sequence
+```
+$ forgechannels
+
+Welcome to ForgeChannels 🚀
+
+Step 1: Configure your sender email
+  → Sign in with Google (opens browser for OAuth)
+  ✓ Authenticated as you@company.com
+
+Step 2: API Keys
+  Google Chat API: ✓ (configured via Google OAuth)
+  Anthropic API key: ________
+  Microsoft Client ID (optional): ________
+  Slack Bot Token (optional): ________
+
+Step 3: Load contacts
+  → Using demo_contacts.csv (15 contacts)
+  → Or specify path: ________
+
+Step 4: Detecting channels...
+  ✓ alice@startup.io     → Google Chat (confidence: 0.92)
+  ✓ bob@enterprise.com   → Teams (confidence: 0.87)
+  ✓ carol@devtools.co    → Slack (confidence: 0.95)
+  ...
+
+Step 5: Generating AI messages...
+  Preview:
+  ┌─ Google Chat → alice@startup.io ─────────────┐
+  │ Hey Alice, saw Startup.io just shipped the    │
+  │ new onboarding flow — nice work. We've been   │
+  │ helping similar teams cut churn by 30%...      │
+  └───────────────────────────────────────────────┘
+
+  Send all? [y/n/edit]
+```
 
 ---
 
@@ -55,15 +90,16 @@ Upload CSV → Detect chat channels → AI writes channel-native messages → Pr
 
 | Layer | Choice | Why |
 |---|---|---|
-| Frontend | React + Vite + TailwindCSS + shadcn/ui | Fast to build, beautiful out of the box |
-| Backend | Python FastAPI | Best async support, minimal boilerplate |
-| Database | PostgreSQL via Supabase (free tier) | Instant setup, built-in realtime websockets |
-| Queue | Redis + RQ | Simple background jobs, no infra overhead |
-| AI | Anthropic Claude API (`claude-sonnet-4-6`) | Best quality, structured JSON output |
-| Google Chat detection | Google Chat API + Workspace Admin SDK | External messaging probe |
+| CLI Framework | Python + `rich` + `typer` | Beautiful terminal UI, progress bars, tables, prompts |
+| Auth | Google OAuth 2.0 (installed app flow) | Opens browser, returns token — configures Google Chat API automatically |
+| Config storage | `~/.forgechannels/config.json` | Persists API keys + OAuth tokens between runs |
+| AI (opener) | Anthropic Claude API (`claude-sonnet-4-6`) | Best quality for first impression message |
+| AI (conversation) | Gemini 2.0 Flash (free tier) OR Groq Llama 3 | Free, fast — handles ongoing back-and-forth replies |
+| Scheduling | Calendly / Cal.com link generation | Drop a booking link when prospect is warm |
+| Google Chat detection | Google Chat API (via OAuth token) | External messaging probe |
 | Teams detection | Microsoft Graph API | M365 user lookup + Teams presence |
 | Slack detection | Slack Web API | Email → workspace member match |
-| Containers | Docker Compose | Local dev only |
+| CSV parsing | `pandas` | Robust CSV handling |
 
 ---
 
@@ -71,218 +107,61 @@ Upload CSV → Detect chat channels → AI writes channel-native messages → Pr
 
 ```
 forgechannels/
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── ui/                         # shadcn/ui primitives
-│   │   │   ├── ContactTable.tsx            # contact list with channel badges
-│   │   │   ├── ChannelBadge.tsx            # Google/Teams/Slack icon per contact
-│   │   │   ├── MessagePreviewCard.tsx      # AI message previews per channel
-│   │   │   ├── SequenceLauncher.tsx        # one-click launch button
-│   │   │   └── StatusFeed.tsx              # realtime event stream
-│   │   ├── pages/
-│   │   │   ├── Dashboard.tsx               # main view
-│   │   │   ├── Upload.tsx                  # drag-and-drop CSV
-│   │   │   └── Settings.tsx                # whitelabel config
-│   │   ├── hooks/
-│   │   │   ├── useContacts.ts
-│   │   │   ├── useChannelDetection.ts
-│   │   │   └── useRealtime.ts              # Supabase realtime
-│   │   ├── lib/
-│   │   │   ├── api.ts                      # typed API client
-│   │   │   ├── theme.ts                    # CSS var injection for whitelabel
-│   │   │   └── supabase.ts
-│   │   ├── App.tsx
-│   │   └── main.tsx
-│   ├── public/logo.svg
-│   ├── index.html
-│   ├── tailwind.config.ts
-│   └── vite.config.ts
+├── cli/
+│   ├── __init__.py
+│   ├── main.py                     # typer app, main entry point
+│   ├── auth/
+│   │   ├── google_oauth.py         # Google OAuth installed app flow
+│   │   └── config_store.py         # read/write ~/.forgechannels/config.json
+│   ├── services/
+│   │   ├── channel_detector.py     # scoring orchestrator
+│   │   ├── google_chat_service.py  # Google Chat API: detect + send + read replies
+│   │   ├── teams_service.py        # Microsoft Graph API calls
+│   │   ├── slack_service.py        # Slack Web API calls
+│   │   ├── ai_opener.py           # Claude API — generates first message
+│   │   ├── ai_conversation.py     # Free LLM — handles ongoing replies
+│   │   └── scheduler.py           # booking link injection + interest detection
+│   ├── prompts/
+│   │   ├── opener.py              # channel-specific opener prompts (Claude)
+│   │   └── conversation.py        # ongoing conversation system prompt (free LLM)
+│   ├── models.py                   # dataclasses for Contact, ChannelScore, Message
+│   └── display.py                  # rich tables, panels, progress bars
 │
-├── backend/
-│   ├── app/
-│   │   ├── api/routes/
-│   │   │   ├── contacts.py                 # CRUD + CSV import
-│   │   │   ├── sequences.py                # sequence management
-│   │   │   ├── channels.py                 # detection trigger
-│   │   │   ├── messages.py                 # AI message gen
-│   │   │   ├── gdpr.py                     # opt-out, consent, erasure
-│   │   │   └── webhooks.py                 # Salesforge inbound
-│   │   ├── api/deps.py                     # FastAPI DI
-│   │   ├── core/
-│   │   │   ├── config.py                   # pydantic-settings env vars
-│   │   │   ├── auth.py                     # X-API-Key middleware
-│   │   │   └── database.py                 # SQLAlchemy async
-│   │   ├── services/
-│   │   │   ├── channel_detector.py         # scoring orchestrator
-│   │   │   ├── google_chat_service.py      # Google Chat API probe
-│   │   │   ├── teams_service.py            # Microsoft Graph API calls
-│   │   │   ├── slack_service.py            # Slack Web API calls
-│   │   │   ├── ai_service.py               # Claude API calls
-│   │   │   ├── gdpr_service.py             # consent/opt-out logic
-│   │   │   └── queue_service.py            # RQ job enqueue
-│   │   ├── models/
-│   │   │   ├── contact.py
-│   │   │   ├── sequence.py
-│   │   │   ├── channel_profile.py
-│   │   │   ├── message.py
-│   │   │   └── gdpr_log.py
-│   │   ├── workers/
-│   │   │   ├── detection_worker.py         # runs channel detection jobs
-│   │   │   └── message_worker.py           # runs AI generation jobs
-│   │   ├── prompts/
-│   │   │   ├── google_chat.py
-│   │   │   ├── teams.py
-│   │   │   └── slack.py
-│   │   └── main.py
-│   ├── migrations/
-│   ├── requirements.txt
-│   └── Dockerfile
-│
-├── shared/types/                           # shared TS types
-├── docker-compose.yml
+├── demo_contacts.csv               # 15 realistic test contacts
+├── credentials/
+│   └── google_client_secret.json   # Google OAuth client ID (checked in, public client)
+├── requirements.txt
+├── setup.py                        # `pip install -e .` → `forgechannels` command
 ├── .env.example
 └── README.md
 ```
 
 ---
 
-## Database Schema
+## Config Storage
 
-```sql
--- Tenants (whitelabel clients, e.g. Salesforge)
-CREATE TABLE tenants (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name        TEXT NOT NULL,
-  api_key     TEXT UNIQUE NOT NULL,
-  theme       JSONB DEFAULT '{}',   -- { primaryColor, logoUrl, companyName, domain }
-  created_at  TIMESTAMPTZ DEFAULT NOW()
-);
+No database needed. Config is stored locally at `~/.forgechannels/config.json`:
 
--- Contacts imported via CSV or Salesforge webhook
-CREATE TABLE contacts (
-  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id    UUID REFERENCES tenants(id),
-  email        TEXT NOT NULL,
-  first_name   TEXT,
-  last_name    TEXT,
-  company      TEXT,
-  title        TEXT,
-  raw_csv_data JSONB,
-  created_at   TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(tenant_id, email)
-);
-
--- Channel detection results per contact
--- channel: 'google_chat' | 'teams' | 'slack'
-CREATE TABLE channel_profiles (
-  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  contact_id          UUID REFERENCES contacts(id),
-  channel             TEXT NOT NULL,          -- 'google_chat' | 'teams' | 'slack'
-  reachable           BOOLEAN DEFAULT FALSE,
-  confidence_score    FLOAT,                  -- 0.0–1.0
-  weighted_score      FLOAT,                  -- confidence × channel_weight
-  channel_identifier  TEXT,                   -- workspace user ID / Teams UPN / Chat user ID
-  external_enabled    BOOLEAN,                -- whether org has external messaging open
-  detected_at         TIMESTAMPTZ DEFAULT NOW(),
-  raw_api_response    JSONB
-);
-
--- Outreach sequences
-CREATE TABLE sequences (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id  UUID REFERENCES tenants(id),
-  name       TEXT NOT NULL,
-  status     TEXT DEFAULT 'draft',            -- draft | active | paused | completed
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Contacts enrolled in a sequence
-CREATE TABLE sequence_contacts (
-  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  sequence_id      UUID REFERENCES sequences(id),
-  contact_id       UUID REFERENCES contacts(id),
-  assigned_channel TEXT,                      -- winning channel
-  status           TEXT DEFAULT 'pending',    -- pending | sent | replied | bounced | opted_out
-  scheduled_at     TIMESTAMPTZ,
-  sent_at          TIMESTAMPTZ
-);
-
--- AI-generated messages
-CREATE TABLE messages (
-  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  sequence_contact_id   UUID REFERENCES sequence_contacts(id),
-  channel               TEXT NOT NULL,        -- 'google_chat' | 'teams' | 'slack'
-  body                  TEXT NOT NULL,        -- all channels use body only (no email subject)
-  generated_at          TIMESTAMPTZ DEFAULT NOW(),
-  approved              BOOLEAN DEFAULT FALSE,
-  sent                  BOOLEAN DEFAULT FALSE
-);
-
--- GDPR audit trail
-CREATE TABLE gdpr_logs (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  contact_id  UUID REFERENCES contacts(id),
-  event_type  TEXT NOT NULL,  -- 'opt_out' | 'consent_recorded' | 'data_deleted' | 'legitimate_interest'
-  channel     TEXT,
-  basis       TEXT,           -- legal basis description
-  ip_address  TEXT,
-  timestamp   TIMESTAMPTZ DEFAULT NOW(),
-  metadata    JSONB
-);
-
-CREATE TABLE opt_outs (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  contact_id    UUID REFERENCES contacts(id),
-  channel       TEXT,                         -- NULL = all channels
-  opted_out_at  TIMESTAMPTZ DEFAULT NOW(),
-  method        TEXT                          -- 'reply' | 'api' | 'manual'
-);
+```json
+{
+  "google_oauth_token": { "access_token": "...", "refresh_token": "...", "expiry": "..." },
+  "sender_email": "you@company.com",
+  "anthropic_api_key": "sk-ant-...",
+  "microsoft_client_id": "...",
+  "microsoft_client_secret": "...",
+  "microsoft_tenant_id": "...",
+  "slack_bot_token": "xoxb-...",
+  "slack_community_workspaces": ["T01234", "T56789"]
+}
 ```
 
----
+### Google OAuth Setup
 
-## API Endpoints
-
-```
-# Contacts
-POST   /api/contacts/import-csv              Upload CSV → returns job_id
-GET    /api/contacts                         List all contacts for tenant
-GET    /api/contacts/{id}
-DELETE /api/contacts/{id}                    Triggers GDPR deletion
-
-# Channel Detection
-POST   /api/channels/detect/{contact_id}     Enqueue detection for one contact
-POST   /api/channels/detect-batch            Enqueue for all contacts in sequence
-GET    /api/channels/status/{job_id}         Poll job status
-GET    /api/contacts/{id}/channels           Get detection results
-
-# AI Messages
-POST   /api/messages/generate/{contact_id}   Generate for contact's winning channel
-POST   /api/messages/generate-batch          Generate for all contacts in sequence
-GET    /api/messages/{contact_id}
-PUT    /api/messages/{id}/approve
-
-# Sequences
-POST   /api/sequences
-GET    /api/sequences
-POST   /api/sequences/{id}/launch            One-click launch
-GET    /api/sequences/{id}/status
-
-# GDPR
-POST   /api/gdpr/opt-out
-GET    /api/gdpr/contact/{id}                Audit log for one contact
-POST   /api/gdpr/delete/{id}                 Right to erasure
-GET    /api/gdpr/export/{id}                 Data export
-
-# Salesforge Webhooks (inbound)
-POST   /webhooks/salesforge/contact          Contact pushed from Salesforge
-POST   /webhooks/salesforge/sequence         Sequence trigger from Salesforge
-
-# Whitelabel
-GET    /api/tenant/theme
-PUT    /api/tenant/theme
-```
+- Use **Google OAuth 2.0 for Installed Applications** (Desktop app flow)
+- On first run: opens browser → user signs in with Google → grants Chat API + Gmail scopes
+- Token is saved to config — subsequent runs reuse it (auto-refresh)
+- This single sign-in configures both the sender identity AND the Google Chat API credentials
+- Scopes needed: `https://www.googleapis.com/auth/chat.messages.create`, `https://www.googleapis.com/auth/userinfo.email`
 
 ---
 
@@ -395,126 +274,93 @@ Sender: {sender_name}
 
 ---
 
-## GDPR Compliance Design
+## Conversation Flow (Free LLM)
 
-| Requirement | Implementation |
-|---|---|
-| Lawful basis | Legitimate interest logged per contact at CSV import time |
-| Opt-out | `opt_outs` table; checked before every send job; reply-based opt-out detected by keyword matching |
-| Right to erasure | Cascade delete contact + profiles + messages; gdpr_log tombstone retained |
-| Audit trail | All events written to `gdpr_logs` with timestamp + IP |
-| Data retention | Cron deletes inactive contacts after 24 months (configurable per tenant) |
-| Opt-out instruction | Appended to every generated message: "Reply STOP to opt out" |
-| Channel-specific | Opt-out on one channel does not auto-opt-out others unless contact requests all-channel removal |
+After the initial opener is sent, the tool needs to handle replies automatically to keep the conversation going naturally and steer toward a booked call.
+
+**Why a free LLM:** The opener uses Claude for quality, but ongoing conversation could be dozens of back-and-forth messages across many contacts. A free model keeps costs at zero.
+
+**Options (pick one):**
+| Model | Free Tier | Speed | How |
+|---|---|---|---|
+| **Gemini 2.0 Flash** | 15 RPM / 1M tokens/day free | Very fast | `google-generativeai` Python SDK |
+| **Groq (Llama 3.3 70B)** | 30 RPM free | Extremely fast | `groq` Python SDK |
+| **Ollama (local)** | Unlimited, runs locally | Depends on hardware | `ollama` CLI + API |
+
+**Conversation system prompt:**
+```
+You are a friendly sales rep having a Google Chat conversation.
+Your goal: build rapport → understand their needs → book a demo call.
+Keep messages short (1-3 sentences). Sound human, not like a bot.
+When the prospect shows interest, naturally suggest a quick call and share the booking link: {booking_url}
+Never be pushy. If they say no, be gracious and leave the door open.
+Match their energy and tone.
+```
+
+**Reply detection:** Poll Google Chat API for new messages in active conversations, or use a webhook/push notification if available.
 
 ---
 
-## Whitelabel System
+## Schedule Call / Demo Booking
 
-Theme stored as JSONB per tenant:
-```json
-{
-  "primaryColor": "#6366f1",
-  "logoUrl": "https://...",
-  "companyName": "Salesforge",
-  "domain": "channels.salesforge.ai",
-  "fontFamily": "Inter"
-}
+The end goal of every conversation is booking a call. The tool needs to:
+
+1. **Detect buying signals** — LLM classifies each reply as: `interested` / `neutral` / `not_interested` / `already_booking`
+2. **Drop the booking link** — when interest is detected, the LLM naturally weaves in a scheduling link
+3. **Booking link options:**
+   - **Calendly:** user provides their Calendly link in setup (simplest for demo)
+   - **Cal.com:** same approach, user provides link
+   - **Google Calendar API:** generate a proposed time directly (more impressive but harder)
+4. **Confirmation tracking** — detect when prospect confirms a time or clicks the link
+
+**Example conversation flow:**
 ```
+[Opener — Claude]
+Hey Alice, saw TechStartup just shipped the new onboarding flow — nice work.
+We've been helping similar teams cut churn by 30% with channel-based outreach.
+Worth a quick look?
 
-On frontend load: fetch `/api/tenant/theme` → inject as CSS variables into `:root` → shadcn/ui picks them up automatically. Logo swapped via `theme.logoUrl`. Live preview in Settings page.
+[Reply from Alice]
+Oh interesting, how does that work exactly?
 
----
+[Free LLM reply]
+In short — instead of email, we reach people on the tools they already have open
+(Chat, Teams, Slack). Response rates are 3-5x higher. Happy to walk you through
+a quick 15-min demo if you're curious? Here's my calendar: https://cal.com/you/15min
 
-## Salesforge Webhook Payloads
+[Reply from Alice]
+Sure, Thursday works
 
-```json
-// POST /webhooks/salesforge/contact
-{
-  "event": "contact.created",
-  "api_key": "sf_...",
-  "contact": {
-    "email": "...",
-    "firstName": "...",
-    "lastName": "...",
-    "company": "...",
-    "title": "..."
-  }
-}
-
-// POST /webhooks/salesforge/sequence
-{
-  "event": "sequence.triggered",
-  "api_key": "sf_...",
-  "sequence_id": "...",
-  "contact_ids": ["...", "..."]
-}
+[Free LLM reply]
+Booked! Looking forward to it 🙌
 ```
 
 ---
 
-## Docker Compose
+## Demo Contacts CSV
 
-```yaml
-services:
-  backend:
-    build: ./backend
-    ports: ["8000:8000"]
-    env_file: .env
-    depends_on: [redis]
+Ship a `demo_contacts.csv` with 15 realistic test contacts spanning different company types:
 
-  worker:
-    build: ./backend
-    command: rq worker --with-scheduler
-    env_file: .env
-    depends_on: [redis]
-
-  frontend:
-    build: ./frontend
-    ports: ["5173:5173"]
-    env_file: .env
-
-  redis:
-    image: redis:7-alpine
-    ports: ["6379:6379"]
+```csv
+email,first_name,last_name,company,title,signal
+alice.chen@techstartup.io,Alice,Chen,TechStartup,Head of Growth,"Just launched v2.0 of their onboarding flow"
+bob.mueller@enterprise-corp.com,Bob,Mueller,EnterpriseCorp,VP Sales,"Expanding into EMEA market Q1 2026"
+carol.davis@devtools.co,Carol,Davis,DevTools,CTO,"Active in #product-led-growth Slack community"
+dave.kim@saas-platform.com,Dave,Kim,SaaSPlatform,Head of Partnerships,"Spoke at SaaStr on partner ecosystems"
+elena.volkov@fintech-eu.de,Elena,Volkov,FintechEU,COO,"Series B announced last month"
+frank.osei@cloudops.io,Frank,Osei,CloudOps,Director of Engineering,"Hiring 5 backend engineers"
+grace.nakamura@retailtech.com,Grace,Nakamura,RetailTech,CMO,"Rebranded and launched new positioning"
+hassan.ahmed@dataflow.ai,Hassan,Ahmed,DataFlow,Founder & CEO,"Y Combinator W26 batch"
+iris.johnson@consulting-group.com,Iris,Johnson,ConsultingGroup,Managing Partner,"Published report on AI adoption in enterprise"
+jake.torres@marketstack.io,Jake,Torres,MarketStack,Growth Lead,"3x ARR growth last year"
+kate.wright@securenet.com,Kate,Wright,SecureNet,CISO,"Speaking at RSA Conference 2026"
+liam.brennan@edtech.co,Liam,Brennan,EdTech,VP Product,"Just shipped AI tutoring feature"
+maya.patel@healthbridge.io,Maya,Patel,HealthBridge,CEO,"Won TechCrunch Disrupt Health track"
+noah.silva@logistix.com,Noah,Silva,Logistix,Head of Operations,"Expanding warehouse network to 12 cities"
+olivia.zhang@creativeai.co,Olivia,Zhang,CreativeAI,Head of Design,"Open source design system has 5k GitHub stars"
 ```
 
-PostgreSQL is hosted on Supabase — no local container required.
-
----
-
-## Environment Variables
-
-```bash
-# Supabase
-SUPABASE_URL=
-SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_KEY=
-DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/db
-
-# AI
-ANTHROPIC_API_KEY=
-
-# Channel APIs
-GOOGLE_CHAT_SERVICE_ACCOUNT_JSON=    # Google Workspace service account
-GOOGLE_WORKSPACE_DOMAIN=             # e.g. yourcompany.com
-
-MICROSOFT_CLIENT_ID=                 # Azure AD app registration
-MICROSOFT_CLIENT_SECRET=
-MICROSOFT_TENANT_ID=
-
-SLACK_BOT_TOKEN=                     # Bot token with users:read.email scope
-SLACK_COMMUNITY_WORKSPACES=          # Comma-separated workspace IDs to probe
-
-# App
-API_KEY_SECRET=
-REDIS_URL=redis://localhost:6379
-
-# Frontend (Vite)
-VITE_API_URL=http://localhost:8000
-VITE_SUPABASE_URL=
-VITE_SUPABASE_ANON_KEY=
-```
+This CSV includes a `signal` column — used by Claude to personalize each message with a relevant, specific opener.
 
 ---
 
@@ -522,80 +368,81 @@ VITE_SUPABASE_ANON_KEY=
 
 | Purpose | Library |
 |---|---|
-| Async HTTP (backend) | `httpx` |
-| Job queue | `rq` + `redis` |
-| ORM + migrations | `sqlalchemy[asyncio]` + `alembic` |
-| Env config | `pydantic-settings` |
+| CLI framework | `typer` |
+| Terminal UI | `rich` (tables, panels, progress bars, prompts) |
+| Async HTTP | `httpx` |
 | CSV parsing | `pandas` |
-| Google API | `google-auth` + `google-api-python-client` |
+| Google OAuth | `google-auth-oauthlib` + `google-auth` |
+| Google Chat API | `google-api-python-client` |
 | Microsoft Graph | `msal` + `httpx` |
-| Charts | `recharts` |
-| Data tables | `@tanstack/react-table` |
-| Icons | `lucide-react` |
-| Toast / notifications | `sonner` |
-| File upload | `react-dropzone` |
+| Slack API | `slack_sdk` |
+| AI (opener) | `anthropic` |
+| AI (conversation) | `google-generativeai` or `groq` |
 
 ---
 
 ## 48h Build Order
 
-### Hours 0–4: Foundation
-- [ ] Supabase project + run schema SQL
-- [ ] FastAPI scaffold: `main.py`, auth middleware, `/health`
-- [ ] Vite + React + Tailwind + shadcn/ui scaffold
-- [ ] Docker Compose wired
+### Hours 0–4: Foundation + Setup Flow
+- [ ] Python project scaffold: `setup.py`, `requirements.txt`, typer app
+- [ ] Config store: `~/.forgechannels/config.json` read/write
+- [ ] Google OAuth installed app flow (opens browser, saves token)
+- [ ] Setup wizard: prompt for API keys + booking link
+- [ ] `demo_contacts.csv` created with 15 realistic contacts
 
-### Hours 4–10: CSV Import + Contact Display
-- [ ] `POST /api/contacts/import-csv`
-- [ ] Upload page (drag-and-drop)
-- [ ] Contact table with channel status columns (Google Chat / Teams / Slack badges)
-
-### Hours 10–18: Channel Detection ← *Core demo value*
-- [ ] Microsoft Teams detection via Graph API — most reliable for demo
-- [ ] Slack detection via `users.lookupByEmail` — high visual impact
-- [ ] Google Chat probe — mock fallback if API access blocked during hackathon
+### Hours 4–12: Channel Detection + Google Chat API
+- [ ] CSV parser with validation (pandas)
+- [ ] Rich table display of loaded contacts
+- [ ] Google Chat detection via OAuth token (can we send? → reachable)
+- [ ] Teams detection via Graph API (if keys provided)
+- [ ] Slack detection via `users.lookupByEmail` (if token provided)
 - [ ] Scoring algorithm with fallback chain
-- [ ] RQ worker queue
-- [ ] Supabase Realtime → frontend badge updates live
-- [ ] Channel badge UI: Google Chat (blue G), Teams (purple), Slack (rainbow hash)
+- [ ] Google Chat send message via API (real sends)
+- [ ] Google Chat read replies (poll for new messages)
 
-### Hours 18–28: AI Message Generation ← *Second biggest wow*
-- [ ] Claude API + all 3 channel prompt templates
-- [ ] Hardcode 2–3 realistic signals per demo contact
-- [ ] `POST /api/messages/generate-batch`
-- [ ] Message preview cards showing same contact, different channel tones side-by-side
-- [ ] Approve/edit inline
+### Hours 12–20: AI — Opener + Conversation
+- [ ] Claude API integration for personalized openers
+- [ ] Free LLM setup (Gemini Flash or Groq) for conversation
+- [ ] Conversation system prompt with booking link injection
+- [ ] Interest detection: classify replies as interested/neutral/not_interested
+- [ ] Auto-reply loop: read reply → generate response → send → repeat
+- [ ] Rich panels showing conversation threads per contact
 
-### Hours 28–36: Sequence Launch + Dashboard
-- [ ] "Launch Sequence" button
-- [ ] Sequence status tracking
-- [ ] Channel breakdown chart — pie showing Google Chat vs Teams vs Slack split (recharts)
-- [ ] Realtime status feed showing send events
+### Hours 20–28: Schedule Call Flow
+- [ ] Booking link configuration in setup (Calendly/Cal.com URL)
+- [ ] LLM naturally suggests call when interest detected
+- [ ] Track conversation state per contact (opener_sent → in_conversation → call_proposed → booked)
+- [ ] Summary dashboard: how many contacted / replied / booked
 
-### Hours 36–42: GDPR + Whitelabel
-- [ ] Opt-out endpoint + "Reply STOP" detection stub
-- [ ] CSS var theme engine + live preview
-- [ ] Salesforge webhook endpoint
+### Hours 28–36: Integration + Error Handling
+- [ ] End-to-end flow: detect → send opener → converse → book call
+- [ ] Graceful handling when APIs are unavailable
+- [ ] Token refresh for expired Google OAuth
+- [ ] `--dry-run` flag to preview without sending
+- [ ] Mock mode with realistic delays for demo fallback
 
-### Hours 42–48: Polish + Demo Prep
-- [ ] 10 realistic demo contacts seeded — mix of Workspace, M365, and Slack users
-- [ ] Demo script rehearsed
-- [ ] Mobile responsive cleanup
-- [ ] README + `.env.example` finalized
+### Hours 36–48: Demo Prep + Polish
+- [ ] `README.md` with setup instructions
+- [ ] Demo script rehearsed end-to-end
 - [ ] Fallback demo video recorded
+- [ ] Edge case cleanup
 
 ---
 
 ## Demo Script (for judges / Salesforge)
 
-1. Open `http://localhost:5173`
-2. Drag in `demo_contacts.csv` — 10 contacts from different company types
-3. Click **Detect Channels** → watch Google Chat / Teams / Slack badges populate in realtime
-4. Show the channel breakdown chart — "60% of your prospects are reachable on channels no one else is using"
-5. Click **Generate Messages** → Claude writes messages tuned to each channel's norms
-6. Show message preview cards side by side — Teams message is formal, Slack is casual, Google Chat is somewhere in between — same contact, totally different voice
-7. Click **Launch Sequence** → realtime status feed
-8. Switch to GDPR tab → show legitimate interest log, opt-out trail
-9. Switch to Settings → swap logo + primary color → UI rebrands live as "Salesforge Channels"
+1. Open terminal, run `forgechannels`
+2. **Setup:** Sign in with Google (browser opens, one click) → "Authenticated as demo@company.com"
+3. Paste API keys, set booking link → saved
+4. **Load contacts:** `Using demo_contacts.csv — 15 contacts loaded`
+5. **Detect channels** → live progress bar, channels light up per contact:
+   - "alice@techstartup.io → Google Chat ✓"
+   - "bob@enterprise-corp.com → Teams ✓"
+   - "carol@devtools.co → Slack ✓"
+6. **Summary table** — "60% reachable on channels no one else is using"
+7. **Send openers** → Claude writes personalized first messages → sends via Google Chat
+8. **Live conversation** → show a reply coming in → free LLM auto-responds naturally
+9. **Booking moment** → prospect shows interest → LLM drops the calendar link → call booked
+10. **Dashboard** — "5 contacted / 3 replied / 1 call booked"
 
-**The pitch line:** *"Email is full. LinkedIn is saturated. Your buyers are sitting in Google Chat, Teams, and Slack all day — and nobody is reaching them there. ForgeChannels changes that."*
+**The pitch line:** *"Email is full. LinkedIn is saturated. Your buyers are sitting in Google Chat all day — and nobody is reaching them there. One command starts the conversation. AI keeps it going. You just show up to the call."*
