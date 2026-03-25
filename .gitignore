@@ -1,8 +1,10 @@
 # Dependencies
 node_modules/
+.venv/
 venv/
 __pycache__/
 *.pyc
+*.egg-info/
 
 # Environment variables
 .env
@@ -19,16 +21,21 @@ __pycache__/
 # Build output
 dist/
 build/
-*.egg-info/
 
 # Logs
 *.log
 npm-debug.log*
 
-# API keys / secrets
+# Secrets & credentials — never commit these
 *.pem
 *.key
-forgechannels/credentials/google_client_secret.json
-forgechannels/token.json
+credentials/
+**/google_client_secret.json
 **/token.json
 ~/.forgechannels/
+
+# Playwright
+.playwright-mcp/
+
+# Claude
+.claude/
