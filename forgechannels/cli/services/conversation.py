@@ -191,7 +191,7 @@ def _check_and_respond(chat_service, ai_client, conv: Conversation, sender_name:
         conv.status = "closed"
         return
 
-    # For interested/booked/neutral — try to create calendar event if a time is mentioned
+    # For interested/booked — try to create calendar event if a time is mentioned
     meeting_note = ""
     if interest in ("interested", "booked") and not conv.meeting_created:
         meeting_result = _maybe_create_meeting(ai_client, creds, sender_email, conv)
@@ -201,10 +201,10 @@ def _check_and_respond(chat_service, ai_client, conv: Conversation, sender_name:
             meeting_note = (
                 f"\n\n[SYSTEM: A calendar invite has been sent to {conv.contact.email} for "
                 f"{meeting_result['human_time']}. The Meet link is {meeting_result['meet_link']}. "
-                f"Confirm this to the prospect — tell them the invite is sent and share the link.]"
+                f"Share the link AND the date/time — e.g. 'nice, booked for {meeting_result['human_time']}. here's the link: {meeting_result['meet_link']}. talk soon']"
             )
 
-    if interest == "booked":
+    if interest == "booked" or conv.meeting_created:
         conv.status = "booked"
     elif interest == "interested":
         conv.status = "call_proposed"
@@ -252,9 +252,10 @@ def _maybe_create_meeting(ai_client, creds, sender_email: str, conv: Conversatio
             creds,
             attendee_email=conv.contact.email,
             sender_email=sender_email,
-            summary=f"Quick chat — {conv.contact.company}",
+            summary=f"15 min call — {conv.contact.company}",
             days_from_now=time_info["days_from_now"],
             hour=time_info["hour"],
+            duration_minutes=15,
         )
         meet_link = event["meet_link"]
         start_dt = datetime.fromisoformat(event["start_time"])

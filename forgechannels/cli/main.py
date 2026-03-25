@@ -16,7 +16,6 @@ from cli.auth.config_store import load_config, set_config_value, get_config_valu
 from cli.services.google_chat_service import get_chat_service, send_message
 from cli.services.teams_service import authenticate_teams, send_teams_message
 from cli.services.email_provider import detect_provider, provider_display_name
-from cli.services.calendar_service import create_meet_event
 from cli.services.ai_service import create_client as create_ai_client
 from cli.services.conversation import Conversation, poll_and_respond
 from cli.models import Contact, MessageResult
@@ -25,10 +24,8 @@ app = typer.Typer()
 console = Console()
 
 MESSAGE_TEMPLATE = (
-    "Hey {first_name}, I saw {company} recently {signal} — nice work. "
-    "Would love to chat about how we could help you grow even faster. "
-    "I have a {duration}-min slot on {meeting_time} if that works? "
-    "Here's the link: {booking_url}"
+    "Hey {first_name} — saw {company} {signal}, pretty cool. "
+    "Would you be up for a quick 15 min call sometime this week?"
 )
 
 
@@ -83,15 +80,12 @@ def display_contacts(contacts: list[Contact]) -> None:
     console.print(table)
 
 
-def generate_message(contact: Contact, booking_url: str = "", meeting_time: str = "", duration: int = 15) -> str:
+def generate_message(contact: Contact) -> str:
     """Generate the outreach message for a contact."""
     return MESSAGE_TEMPLATE.format(
         first_name=contact.first_name,
         company=contact.company,
         signal=contact.signal.lower(),
-        booking_url=booking_url or "https://www.google.com",
-        meeting_time=meeting_time or "later this week",
-        duration=duration,
     )
 
 
@@ -100,6 +94,7 @@ def preview_messages(contacts: list[Contact]) -> None:
     console.print("\n[bold]Message Previews:[/bold]\n")
     for contact in contacts:
         msg = generate_message(contact)
+
         channel = provider_display_name(contact.provider)
         border = "blue" if contact.provider == "google" else "magenta" if contact.provider == "microsoft" else "dim"
         console.print(
@@ -257,37 +252,8 @@ def run(
 
     total = len(sendable)
 
-    # Step 5a: Create Google Meet links for each contact
-    console.print(f"\n[bold]Step 5:[/bold] Creating calendar events + Meet links\n")
-    meet_links: dict[str, str] = {}  # email -> meet link
-    meet_times: dict[str, str] = {}  # email -> human-readable time
-
-    if creds:
-        sender_email = get_user_email(creds)
-        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
-            cal_task = progress.add_task("Scheduling...", total=len(sendable))
-            for contact in sendable:
-                progress.update(cal_task, description=f"Creating event for {contact.email}...")
-                try:
-                    event = create_meet_event(
-                        creds,
-                        attendee_email=contact.email,
-                        sender_email=sender_email,
-                        summary=f"Quick chat — {contact.company}",
-                    )
-                    meet_links[contact.email] = event["meet_link"]
-                    from datetime import datetime as dt
-                    start_dt = dt.fromisoformat(event["start_time"])
-                    time_str = start_dt.strftime("%A, %b %d at %H:%M UTC")
-                    meet_times[contact.email] = time_str
-                    console.print(f"  [green]✓[/green] {contact.email} → {event['meet_link']}  [dim]({time_str})[/dim]")
-                except Exception as e:
-                    console.print(f"  [yellow]![/yellow] {contact.email} — calendar failed: {e}")
-                progress.advance(cal_task)
-    console.print()
-
-    # Step 5b: Send messages
-    console.print(f"[bold]Step 6:[/bold] Sending messages\n")
+    # Step 5: Send opener messages (no meeting link yet — that comes after they show interest)
+    console.print(f"\n[bold]Step 5:[/bold] Sending opener messages\n")
     results: list[MessageResult] = []
 
     def try_google_chat(contact: Contact, msg_text: str) -> MessageResult:
@@ -309,9 +275,7 @@ def run(
         task = progress.add_task("Sending...", total=total)
 
         for contact in sendable:
-            booking_url = meet_links.get(contact.email, "https://www.google.com")
-            meeting_time = meet_times.get(contact.email, "")
-            msg_text = generate_message(contact, booking_url=booking_url, meeting_time=meeting_time)
+            msg_text = generate_message(contact)
 
             if contact.provider == "google":
                 # Google Chat only
@@ -393,18 +357,16 @@ def run(
 
         conversations = []
         for r in successful_chat_results:
-            booking_url = meet_links.get(r.contact.email, "https://www.google.com")
-            meeting_time = meet_times.get(r.contact.email, "")
             conv = Conversation(
                 contact=r.contact,
                 space_name=r.space_name,
-                booking_url=booking_url,
+                booking_url="",  # will be set when meeting is created after interest
                 last_seen_time=now_iso,  # only process messages after this point
             )
             # Add the opener we sent as first message in history
             conv.history.append({
                 "role": "assistant",
-                "content": generate_message(r.contact, booking_url=booking_url, meeting_time=meeting_time),
+                "content": generate_message(r.contact),
             })
             conversations.append(conv)
 
