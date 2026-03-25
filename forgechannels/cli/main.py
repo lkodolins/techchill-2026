@@ -16,12 +16,11 @@ from cli.auth.config_store import load_config, set_config_value, get_config_valu
 from cli.services.google_chat_service import get_chat_service, send_message
 from cli.services.teams_service import authenticate_teams, send_teams_message
 from cli.services.email_provider import detect_provider, provider_display_name
+from cli.services.calendar_service import create_meet_event
 from cli.models import Contact, MessageResult
 
 app = typer.Typer()
 console = Console()
-
-BOOKING_URL = "https://www.google.com"
 
 MESSAGE_TEMPLATE = (
     "Hey {first_name}, I saw {company} recently {signal} — nice work. "
@@ -81,13 +80,13 @@ def display_contacts(contacts: list[Contact]) -> None:
     console.print(table)
 
 
-def generate_message(contact: Contact) -> str:
+def generate_message(contact: Contact, booking_url: str = "") -> str:
     """Generate the outreach message for a contact."""
     return MESSAGE_TEMPLATE.format(
         first_name=contact.first_name,
         company=contact.company,
         signal=contact.signal.lower(),
-        booking_url=BOOKING_URL,
+        booking_url=booking_url or "https://www.google.com",
     )
 
 
@@ -205,6 +204,7 @@ def run(
 
     chat_service = None
     teams_token = None
+    creds = None
 
     needs_google = bool(google_contacts or unknown_contacts)
     needs_teams = bool(teams_contacts or unknown_contacts)
@@ -233,7 +233,36 @@ def run(
         console.print("[yellow]Cancelled.[/yellow]")
         raise typer.Exit(0)
 
-    console.print(f"\n[bold]Step 5:[/bold] Sending messages\n")
+    # Step 5a: Create Google Meet links for each contact
+    console.print(f"\n[bold]Step 5:[/bold] Creating calendar events + Meet links\n")
+    meet_links: dict[str, str] = {}  # email -> meet link
+
+    if creds:
+        sender_email = get_user_email(creds)
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+            cal_task = progress.add_task("Scheduling...", total=len(sendable))
+            for contact in sendable:
+                progress.update(cal_task, description=f"Creating event for {contact.email}...")
+                try:
+                    event = create_meet_event(
+                        creds,
+                        attendee_email=contact.email,
+                        sender_email=sender_email,
+                        summary=f"Quick chat — {contact.company}",
+                    )
+                    meet_links[contact.email] = event["meet_link"]
+                    # Parse and display the event time
+                    from datetime import datetime as dt
+                    start_dt = dt.fromisoformat(event["start_time"])
+                    time_str = start_dt.strftime("%b %d, %H:%M UTC")
+                    console.print(f"  [green]✓[/green] {contact.email} → {event['meet_link']}  [dim]({time_str})[/dim]")
+                except Exception as e:
+                    console.print(f"  [yellow]![/yellow] {contact.email} — calendar failed: {e}")
+                progress.advance(cal_task)
+    console.print()
+
+    # Step 5b: Send messages
+    console.print(f"[bold]Step 6:[/bold] Sending messages\n")
     results: list[MessageResult] = []
 
     def try_google_chat(contact: Contact, msg_text: str) -> MessageResult:
@@ -255,7 +284,8 @@ def run(
         task = progress.add_task("Sending...", total=total)
 
         for contact in sendable:
-            msg_text = generate_message(contact)
+            booking_url = meet_links.get(contact.email, "https://www.google.com")
+            msg_text = generate_message(contact, booking_url=booking_url)
 
             if contact.provider == "google":
                 # Google Chat only
