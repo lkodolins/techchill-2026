@@ -1,0 +1,9 @@
+google-api-python-client
+google-auth-oauthlib
+google-auth
+rich
+typer
+pandas
+dnspython
+msal
+requests
