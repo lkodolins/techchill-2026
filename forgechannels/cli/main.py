@@ -27,7 +27,8 @@ console = Console()
 MESSAGE_TEMPLATE = (
     "Hey {first_name}, I saw {company} recently {signal} — nice work. "
     "Would love to chat about how we could help you grow even faster. "
-    "If you're open to it, here's a quick link to grab a time: {booking_url}"
+    "I have a {duration}-min slot on {meeting_time} if that works? "
+    "Here's the link: {booking_url}"
 )
 
 
@@ -82,13 +83,15 @@ def display_contacts(contacts: list[Contact]) -> None:
     console.print(table)
 
 
-def generate_message(contact: Contact, booking_url: str = "") -> str:
+def generate_message(contact: Contact, booking_url: str = "", meeting_time: str = "", duration: int = 15) -> str:
     """Generate the outreach message for a contact."""
     return MESSAGE_TEMPLATE.format(
         first_name=contact.first_name,
         company=contact.company,
         signal=contact.signal.lower(),
         booking_url=booking_url or "https://www.google.com",
+        meeting_time=meeting_time or "later this week",
+        duration=duration,
     )
 
 
@@ -247,20 +250,15 @@ def run(
     anthropic_key = setup_anthropic()
     ai_client = create_ai_client(anthropic_key) if anthropic_key else None
 
-    # Step 5: Confirm and send
+    # Step 5: Send
     if not chat_service and not teams_token:
         console.print("\n[red]No channels authenticated. Nothing to send.[/red]")
         raise typer.Exit(1)
 
-    total = len(sendable)
-    console.print()
-    if not Confirm.ask(f"[bold]Send {total} messages?[/bold]"):
-        console.print("[yellow]Cancelled.[/yellow]")
-        raise typer.Exit(0)
-
     # Step 5a: Create Google Meet links for each contact
     console.print(f"\n[bold]Step 5:[/bold] Creating calendar events + Meet links\n")
     meet_links: dict[str, str] = {}  # email -> meet link
+    meet_times: dict[str, str] = {}  # email -> human-readable time
 
     if creds:
         sender_email = get_user_email(creds)
@@ -276,10 +274,10 @@ def run(
                         summary=f"Quick chat — {contact.company}",
                     )
                     meet_links[contact.email] = event["meet_link"]
-                    # Parse and display the event time
                     from datetime import datetime as dt
                     start_dt = dt.fromisoformat(event["start_time"])
-                    time_str = start_dt.strftime("%b %d, %H:%M UTC")
+                    time_str = start_dt.strftime("%A, %b %d at %H:%M UTC")
+                    meet_times[contact.email] = time_str
                     console.print(f"  [green]✓[/green] {contact.email} → {event['meet_link']}  [dim]({time_str})[/dim]")
                 except Exception as e:
                     console.print(f"  [yellow]![/yellow] {contact.email} — calendar failed: {e}")
@@ -310,7 +308,8 @@ def run(
 
         for contact in sendable:
             booking_url = meet_links.get(contact.email, "https://www.google.com")
-            msg_text = generate_message(contact, booking_url=booking_url)
+            meeting_time = meet_times.get(contact.email, "")
+            msg_text = generate_message(contact, booking_url=booking_url, meeting_time=meeting_time)
 
             if contact.provider == "google":
                 # Google Chat only
@@ -386,19 +385,24 @@ def run(
 
         sender_email = get_user_email(creds)
 
-        # Build conversation objects
+        # Build conversation objects — set last_seen_time to now so we only respond to NEW messages
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat()
+
         conversations = []
         for r in successful_chat_results:
             booking_url = meet_links.get(r.contact.email, "https://www.google.com")
+            meeting_time = meet_times.get(r.contact.email, "")
             conv = Conversation(
                 contact=r.contact,
                 space_name=r.space_name,
                 booking_url=booking_url,
+                last_seen_time=now_iso,  # only process messages after this point
             )
             # Add the opener we sent as first message in history
             conv.history.append({
                 "role": "assistant",
-                "content": generate_message(r.contact, booking_url=booking_url),
+                "content": generate_message(r.contact, booking_url=booking_url, meeting_time=meeting_time),
             })
             conversations.append(conv)
 

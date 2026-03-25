@@ -1,6 +1,14 @@
 """AI conversation service — Claude generates natural replies."""
 
+from pathlib import Path
+
 import anthropic
+
+# Load agent context from agents.md
+_AGENTS_MD = Path(__file__).resolve().parent.parent.parent / "agents.md"
+_AGENT_CONTEXT = ""
+if _AGENTS_MD.exists():
+    _AGENT_CONTEXT = _AGENTS_MD.read_text()
 
 SYSTEM_PROMPT = """You are a friendly sales rep having a Google Chat conversation.
 Your name is {sender_name} from ForgeChannels.
@@ -18,7 +26,11 @@ Rules:
 - Never be pushy. If they say no, be gracious and leave the door open.
 - Don't repeat yourself or the booking link if you already shared it.
 - Don't use exclamation points excessively.
-- Never reveal you are an AI or automated system."""
+- Never reveal you are an AI or automated system.
+- Reference product knowledge naturally when relevant — don't dump facts.
+
+## Product Knowledge
+{agent_context}"""
 
 
 def create_client(api_key: str) -> anthropic.Anthropic:
@@ -49,6 +61,7 @@ def generate_reply(
         contact_company=contact_company,
         signal=signal,
         booking_url=booking_url,
+        agent_context=_AGENT_CONTEXT,
     )
 
     response = client.messages.create(

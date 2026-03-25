@@ -21,7 +21,7 @@ class Conversation:
     booking_url: str
     history: list[dict] = field(default_factory=list)  # {"role": ..., "content": ...}
     status: str = "opener_sent"  # opener_sent, in_conversation, call_proposed, booked, closed
-    last_message_id: str = ""
+    last_seen_time: str = ""  # ISO timestamp of last processed message
     our_sender_id: str = ""
 
 
@@ -79,32 +79,32 @@ def _check_and_respond(chat_service, ai_client, conv: Conversation, sender_name:
     if not messages:
         return
 
-    # Find new messages from the prospect (not from us)
+    # Find new messages from the prospect (not from us), newer than last seen
     new_prospect_messages = []
     for msg in messages:
-        msg_id = msg.get("name", "")
         sender = msg.get("sender", {})
-        sender_type = sender.get("type", "")
         sender_name_id = sender.get("name", "")
 
         # Skip our own messages
-        if sender_name_id == f"users/{sender_id}" or sender_type == "BOT":
+        if sender_name_id == f"users/{sender_id}" or sender.get("type") == "BOT":
             continue
 
-        # Skip messages we've already seen
-        if conv.last_message_id and msg_id <= conv.last_message_id:
+        # Use createTime for timestamp comparison
+        create_time = msg.get("createTime", "")
+        if conv.last_seen_time and create_time <= conv.last_seen_time:
             continue
 
         text = msg.get("text", "").strip()
         if text:
-            new_prospect_messages.append({"id": msg_id, "text": text})
+            new_prospect_messages.append({"time": create_time, "text": text})
 
     if not new_prospect_messages:
         return
 
-    # Process each new message
+    # Process each new message (sorted by time)
+    new_prospect_messages.sort(key=lambda m: m["time"])
     for prospect_msg in new_prospect_messages:
-        conv.last_message_id = prospect_msg["id"]
+        conv.last_seen_time = prospect_msg["time"]
         prospect_text = prospect_msg["text"]
 
         console.print(f"\n  [cyan]{conv.contact.email}[/cyan] replied: [white]{prospect_text}[/white]")
