@@ -4,3 +4,6 @@ google-auth
 rich
 typer
 pandas
+dnspython
+msal
+requests

@@ -11,6 +11,7 @@ class Contact:
     company: str
     title: str
     signal: str
+    provider: str = "unknown"  # 'google', 'microsoft', 'unknown'
 
     @property
     def full_name(self) -> str:
@@ -20,6 +21,7 @@ class Contact:
 @dataclass
 class MessageResult:
     contact: Contact
+    channel: str = ""  # 'google_chat', 'teams'
     space_name: str | None = None
     message_id: str | None = None
     success: bool = False
