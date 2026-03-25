@@ -12,7 +12,7 @@ fi
 
 # Install deps
 source .venv/bin/activate
-pip install -q -r requirements.txt
+python3 -m pip install -q -r requirements.txt
 
 # Run the CLI, passing through any args (e.g. --dry-run)
 python3 -m cli.main "$@"

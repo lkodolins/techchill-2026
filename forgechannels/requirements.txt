@@ -8,3 +8,4 @@ dnspython
 msal
 requests
 anthropic
+pytest
