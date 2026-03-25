@@ -30,12 +30,12 @@ Built for the Salesforge challenge at TechChill 2026.
 
 ## Quick Start
 
-Clone the repo, move into the project folder, and start the app:
+Clone the repo, move into the project folder, and setup the app:
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/lkodolins/conductors-forgechannels.git
 cd techchill
-make run
+make setup
 ```
 
 `make run` enters `forgechannels/`, creates `.venv` if needed, installs dependencies, and starts the CLI.
@@ -43,6 +43,7 @@ make run
 Common variants:
 
 ```bash
+make run
 make dry-run
 make test
 make install
